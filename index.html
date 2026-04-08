@@ -668,7 +668,7 @@ async function loadProfile(){
   const {data}=await sb.from('profiles').select('*').eq('id',U.id).single();
   if(!data||!data.weight){show('s-ob1');return;}
   P=data;
-  await loadWeights();
+  await Promise.all([loadWeights(), loadPhotos(), loadCharges()]);
   calcProfile();
   initHydro();initStars();
   renderDash();renderNutr();buildWeekPlan();
@@ -676,10 +676,51 @@ async function loadProfile(){
 }
 
 async function loadWeights(){
-  const today=new Date().toISOString().split('T')[0];
   const weekAgo=new Date(Date.now()-7*24*60*60*1000).toISOString().split('T')[0];
   const {data}=await sb.from('weight_entries').select('*').eq('user_id',U.id).gte('date',weekAgo).order('date');
-  if(data) weights=data.map(r=>({val:r.value,day:DAYS_FULL[new Date(r.date).getDay()===0?6:new Date(r.date).getDay()-1],date:r.date}));
+  if(data) weights=data.map(r=>{
+    const d=new Date(r.date+'T12:00:00');
+    return {val:r.value,day:DAYS_FULL[d.getDay()===0?6:d.getDay()-1],date:r.date};
+  });
+}
+
+async function loadPhotos(){
+  const {data}=await sb.from('photos').select('*').eq('user_id',U.id).order('date');
+  if(!data||!data.length) return;
+  photos=[];
+  for(const r of data){
+    let src='';
+    if(r.storage_path){
+      const {data:urlData}=await sb.storage.from('photos').createSignedUrl(r.storage_path,3600);
+      if(urlData) src=urlData.signedUrl;
+    }
+    if(!src) continue;
+    photos.push({
+      id:r.id,
+      src,
+      angle:r.angle||'Libre',
+      date:r.date,
+      dateLabel:new Date(r.date+'T12:00:00').toLocaleDateString('fr-FR',{day:'2-digit',month:'long',year:'numeric'}),
+      weight:r.weight_kg,
+      note:r.note,
+      storagePath:r.storage_path,
+      dbId:r.id,
+    });
+  }
+  photoId=photos.length+1;
+  document.getElementById('ph-sub').textContent=photos.length+' photo(s) enregistrée(s)';
+}
+
+async function loadCharges(){
+  const monthAgo=new Date(Date.now()-30*24*60*60*1000).toISOString().split('T')[0];
+  const {data}=await sb.from('workout_sessions').select('*').eq('user_id',U.id).gte('date',monthAgo).not('weight_kg','is',null).order('date');
+  if(!data) return;
+  charges={};
+  data.forEach(r=>{
+    const key=r.exercise;
+    if(!charges[key]) charges[key]=[];
+    charges[key].push({kg:r.weight_kg,date:new Date(r.date+'T12:00:00').toLocaleDateString('fr-FR',{day:'2-digit',month:'2-digit'})});
+  });
 }
 
 function sg(g){
@@ -1038,7 +1079,6 @@ async function savePhoto(){
   const date=document.getElementById('ph-date').value;if(!date){alert('Indique la date.');return;}
   const w=parseFloat(document.getElementById('ph-w').value)||null;
   const note=document.getElementById('ph-note').value.trim();
-  let storagePath=null;
 
   if(U){
     const res=await fetch(src);const blob=await res.blob();
@@ -1046,23 +1086,22 @@ async function savePhoto(){
     const path=`${U.id}/${Date.now()}.${ext}`;
     const {error:upErr}=await sb.storage.from('photos').upload(path,blob,{contentType:blob.type});
     if(!upErr){
-      storagePath=path;
       await sb.from('photos').insert({user_id:U.id,angle:currentAngle,date,weight_kg:w,note,storage_path:path});
+    } else {
+      alert('Erreur upload photo : '+upErr.message);return;
     }
   }
 
-  const photo={id:photoId++,src,angle:currentAngle,date,dateLabel:new Date(date).toLocaleDateString('fr-FR',{day:'2-digit',month:'long',year:'numeric'}),weight:w,note,storagePath};
-  photos.push(photo);
-  photos.sort((a,b)=>new Date(a.date)-new Date(b.date));
-
-  earnBadge('first_photo');addXP(20);
   document.getElementById('ph-preview').style.display='none';
   document.getElementById('ph-img').src='';
   document.getElementById('ph-file').value='';
   document.getElementById('ph-w').value='';
   document.getElementById('ph-note').value='';
-  document.getElementById('ph-sub').textContent=photos.length+' photo(s) · Tap galerie pour voir';
+
+  earnBadge('first_photo');addXP(20);
+  await loadPhotos();
   renderAllPhotos();
+  document.getElementById('ph-sub').textContent=photos.length+' photo(s) enregistrée(s)';
 }
 
 function renderAllPhotos(){renderGallery();renderCompare();renderTimeline();}
