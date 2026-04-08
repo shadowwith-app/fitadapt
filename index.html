@@ -637,7 +637,12 @@ async function loadAll(){
         weight:r.weight_kg,note:r.note,storagePath:r.storage_path});
     }
 
-    // 5. Check-in du jour
+    // 5. Planning semaine
+    const ws=getWeekStart();
+    const {data:wp}=await sb.from('weekly_plans').select('*').eq('user_id',U.id).eq('week_start',ws).single();
+    if(wp&&wp.plan){weekPlan=wp.plan;planValidated=true;}
+
+    // 6. Check-in du jour
     const today=new Date().toISOString().split('T')[0];
     const {data:ci}=await sb.from('checkins').select('*').eq('user_id',U.id).eq('date',today).single();
     if(ci){
@@ -823,11 +828,46 @@ function renderNutr(){
 }
 
 // ── SPORT ─────────────────────────────────────────────────
+function getWeekStart(){
+  const d=new Date();
+  const day=d.getDay()===0?6:d.getDay()-1;
+  d.setDate(d.getDate()-day);
+  return d.toISOString().split('T')[0];
+}
+
+async function loadWeeklyPlan(){
+  const ws=getWeekStart();
+  const {data}=await sb.from('weekly_plans').select('*').eq('user_id',U.id).eq('week_start',ws).single();
+  if(data&&data.plan){
+    weekPlan=data.plan;
+    planValidated=true;
+    document.getElementById('sp-sub').textContent='Planning validé · Semaine du '+ws;
+    rebuildGridFromPlan();
+  }
+}
+
+function rebuildGridFromPlan(){
+  if(!weekPlan.length) return;
+  document.getElementById('day-grid').innerHTML=DAYS.map((d,i)=>`<div class="dc" id="dc-${i}" onclick="toggleDay(${i})"><div class="dn">${DAYS_S[i]}</div><div class="ds" id="ds-${i}"></div></div>`).join('');
+  window._sel=[...weekPlan];
+  DAYS.forEach((_,j)=>{
+    const s=window._sel.find(x=>x.dayIdx===j);
+    if(s){
+      document.getElementById('dc-'+j).className='dc'+(s.isC?' cardio':' muscle');
+      document.getElementById('ds-'+j).textContent=s.type.slice(0,5);
+    }
+  });
+  document.getElementById('day-counter').textContent=window._sel.length+' / '+(P.sessions||3)+' jours · Planning actif';
+  document.getElementById('week-plan').innerHTML=DAYS.map((d,i)=>{const s=window._sel.find(p=>p.dayIdx===i);return`<div class="row"><span style="font-size:13px;">${d}</span><span class="bdg ${s?(s.isC?'bc':'bg'):'bgr'}">${s?s.type:'Repos'}</span></div>`;}).join('');
+}
+
 function buildWeekPlan(){
   window._sel=[];
+  planValidated=false;
   document.getElementById('day-grid').innerHTML=DAYS.map((d,i)=>`<div class="dc" id="dc-${i}" onclick="toggleDay(${i})"><div class="dn">${DAYS_S[i]}</div><div class="ds" id="ds-${i}"></div></div>`).join('');
   document.getElementById('week-plan').innerHTML='';
   document.getElementById('day-counter').textContent='0 jours sélectionnés';
+  loadWeeklyPlan();
 }
 function toggleDay(i){
   if(!window._sel) window._sel=[];
@@ -850,10 +890,17 @@ function toggleDay(i){
   document.getElementById('day-counter').textContent=window._sel.length+' / '+max+' jours';
   document.getElementById('week-plan').innerHTML=DAYS.map((d,i)=>{const s=window._sel.find(p=>p.dayIdx===i);return`<div class="row"><span style="font-size:13px;">${d}</span><span class="bdg ${s?(s.isC?'bc':'bg'):'bgr'}">${s?s.type:'Repos'}</span></div>`;}).join('');
 }
-function validatePlan(){
+async function validatePlan(){
   const n=P.sessions||3;
   if((window._sel||[]).length!==n){alert('Sélectionne exactement '+n+' jour(s).');return;}
-  weekPlan=window._sel;planValidated=true;renderSport();
+  weekPlan=window._sel;
+  planValidated=true;
+  const ws=getWeekStart();
+  const {error}=await sb.from('weekly_plans').upsert({user_id:U.id,week_start:ws,plan:weekPlan,goal:P.goal},{onConflict:'user_id,week_start'});
+  if(error){alert('Erreur sauvegarde planning : '+error.message);return;}
+  document.getElementById('sp-sub').textContent='Planning validé · Semaine du '+ws;
+  flash('sp-banner','✅ Planning sauvegardé pour cette semaine !');
+  renderSport();
 }
 function renderSport(){
   const todayIdx=(new Date().getDay()+6)%7;
