@@ -602,59 +602,72 @@ async function loadAll(){
   show('s-load');
   try{
     // 1. Profil
-    const {data:prof,error:profErr}=await sb.from('profiles').select('*').eq('id',U.id).single();
-    if(profErr||!prof||!prof.weight){show('s-ob1');return;}
+    const {data:prof}=await sb.from('profiles').select('*').eq('id',U.id).single();
+    if(!prof||!prof.weight){show('s-ob1');return;}
     P=prof;
     calcProfile();
 
     // 2. Poids semaine
-    const weekAgo=new Date(Date.now()-7*24*60*60*1000).toISOString().split('T')[0];
-    const {data:ws}=await sb.from('weight_entries').select('*').eq('user_id',U.id).gte('date',weekAgo).order('date');
-    weights=[];
-    if(ws) ws.forEach(r=>{
-      const d=new Date(r.date+'T12:00:00');
-      weights.push({val:r.value,day:DAYS[d.getDay()===0?6:d.getDay()-1],date:r.date});
-    });
+    try{
+      const weekAgo=new Date(Date.now()-7*24*60*60*1000).toISOString().split('T')[0];
+      const {data:ws}=await sb.from('weight_entries').select('*').eq('user_id',U.id).gte('date',weekAgo).order('date');
+      weights=[];
+      if(ws) ws.forEach(r=>{
+        const d=new Date(r.date+'T12:00:00');
+        weights.push({val:r.value,day:DAYS[d.getDay()===0?6:d.getDay()-1],date:r.date});
+      });
+    }catch(e){console.warn('weights error',e);}
 
     // 3. Charges du mois
-    const monthAgo=new Date(Date.now()-30*24*60*60*1000).toISOString().split('T')[0];
-    const {data:ws2}=await sb.from('workout_sessions').select('*').eq('user_id',U.id).gte('date',monthAgo).not('weight_kg','is',null).order('date');
-    charges={};localCharges={};
-    if(ws2) ws2.forEach(r=>{
-      if(!charges[r.exercise]) charges[r.exercise]=[];
-      charges[r.exercise].push({kg:r.weight_kg,date:r.date.slice(5,10).replace('-','/')});
-    });
+    try{
+      const monthAgo=new Date(Date.now()-30*24*60*60*1000).toISOString().split('T')[0];
+      const {data:ws2}=await sb.from('workout_sessions').select('*').eq('user_id',U.id).gte('date',monthAgo).not('weight_kg','is',null).order('date');
+      charges={};localCharges={};
+      if(ws2) ws2.forEach(r=>{
+        if(!charges[r.exercise]) charges[r.exercise]=[];
+        charges[r.exercise].push({kg:r.weight_kg,date:r.date.slice(5,10).replace('-','/')});
+      });
+    }catch(e){console.warn('charges error',e);}
 
     // 4. Photos
-    const {data:ph}=await sb.from('photos').select('*').eq('user_id',U.id).order('date');
-    photos=[];
-    if(ph) for(const r of ph){
-      if(!r.storage_path) continue;
-      const {data:u}=await sb.storage.from('photos').createSignedUrl(r.storage_path,86400);
-      if(!u) continue;
-      photos.push({id:r.id,src:u.signedUrl,angle:r.angle||'Libre',date:r.date,
-        dateLabel:new Date(r.date+'T12:00:00').toLocaleDateString('fr-FR',{day:'2-digit',month:'long',year:'numeric'}),
-        weight:r.weight_kg,note:r.note,storagePath:r.storage_path});
-    }
+    try{
+      const {data:ph}=await sb.from('photos').select('*').eq('user_id',U.id).order('date');
+      photos=[];
+      if(ph) for(const r of ph){
+        if(!r.storage_path) continue;
+        try{
+          const {data:u}=await sb.storage.from('photos').createSignedUrl(r.storage_path,86400);
+          if(!u) continue;
+          photos.push({id:r.id,src:u.signedUrl,angle:r.angle||'Libre',date:r.date,
+            dateLabel:new Date(r.date+'T12:00:00').toLocaleDateString('fr-FR',{day:'2-digit',month:'long',year:'numeric'}),
+            weight:r.weight_kg,note:r.note,storagePath:r.storage_path});
+        }catch(e){console.warn('photo url error',e);}
+      }
+    }catch(e){console.warn('photos error',e);}
 
     // 5. Planning semaine
-    const ws=getWeekStart();
-    const {data:wp}=await sb.from('weekly_plans').select('*').eq('user_id',U.id).eq('week_start',ws).single();
-    if(wp&&wp.plan){weekPlan=wp.plan;planValidated=true;}
+    try{
+      const ws=getWeekStart();
+      const {data:wp}=await sb.from('weekly_plans').select('*').eq('user_id',U.id).eq('week_start',ws).single();
+      if(wp&&wp.plan&&Array.isArray(wp.plan)){weekPlan=wp.plan;planValidated=true;}
+    }catch(e){console.warn('weekly plan error',e);}
 
     // 6. Check-in du jour
-    const today=new Date().toISOString().split('T')[0];
-    const {data:ci}=await sb.from('checkins').select('*').eq('user_id',U.id).eq('date',today).single();
-    if(ci){
-      mood=ci.mood||0;sleepRating=ci.sleep_rating||0;
-      if(ci.water_glasses) hydro.filled=ci.water_glasses;
-    }
+    try{
+      const today=new Date().toISOString().split('T')[0];
+      const {data:ci}=await sb.from('checkins').select('*').eq('user_id',U.id).eq('date',today).single();
+      if(ci){
+        mood=ci.mood||0;
+        sleepRating=ci.sleep_rating||0;
+        if(ci.water_glasses) hydro.filled=ci.water_glasses;
+      }
+    }catch(e){console.warn('checkin error',e);}
 
     initHydro();initStars();
     renderDash();renderNutr();buildWeekPlan();
     show('s-dash');
   }catch(e){
-    console.error('loadAll error',e);
+    console.error('loadAll fatal error',e);
     show('s-auth');
   }
 }
