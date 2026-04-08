@@ -513,7 +513,8 @@ const sb=supabase.createClient(SUPA_URL,SUPA_KEY,{auth:{persistSession:true,auto
 
 let U=null,P={};
 let weights=[],hydro={filled:0,target:10},sleepRating=0,mood=0,ciNote='';
-let xp=0,earnedBadges=new Set();
+let xp=parseInt(localStorage.getItem('fa_xp')||'0');
+let earnedBadges=new Set(JSON.parse(localStorage.getItem('fa_badges')||'[]'));
 let photos=[],currentAngle='Face',currentFilter='Tous';
 let charges={},localCharges={},weekPlan=[],planValidated=false;
 let baSlots={before:null,after:null},pickerTarget=null;
@@ -730,13 +731,18 @@ function renderDash(){
   document.getElementById('d-p').textContent=(P.prot||'—')+'g';
   document.getElementById('d-c').textContent=(P.carb||'—')+'g';
   document.getElementById('d-f').textContent=(P.fat||'—')+'g';
-  const cw=wavg();
-  document.getElementById('d-pw').textContent=cw.toFixed(1)+' kg';
-  document.getElementById('d-tw').textContent=(P.target_weight||'—')+' kg objectif';
-  const tot=Math.abs((P.weight||80)-(P.target_weight||75))||1;
-  const done=Math.abs((P.weight||80)-cw);
-  document.getElementById('d-prog').style.width=Math.min(95,Math.max(3,Math.round(done/tot*100)))+'%';
-  document.getElementById('d-eta').textContent='~'+Math.ceil(Math.abs(cw-(P.target_weight||75))/0.5)+' semaines estimées';
+  const cw=weights.length?wavg():P.weight;
+  const startW=P.weight||80;
+  const targetW=P.target_weight||75;
+  document.getElementById('d-pw').textContent=cw.toFixed(1)+' kg actuel';
+  document.getElementById('d-tw').textContent=targetW+' kg objectif';
+  const tot=Math.abs(startW-targetW)||1;
+  const done=Math.abs(startW-cw);
+  const goingRight=(P.goal==='lose'&&cw<startW)||(P.goal==='gain'&&cw>startW)||(P.goal==='maintain');
+  const pct=goingRight?Math.min(95,Math.round(done/tot*100)):3;
+  document.getElementById('d-prog').style.width=Math.max(3,pct)+'%';
+  const rem=Math.abs(cw-targetW);
+  document.getElementById('d-eta').textContent=rem<0.5?'Objectif atteint !':'~'+Math.ceil(rem/0.5)+' semaines estimees';
   renderXP();renderCK();
 }
 function renderCK(){
@@ -805,7 +811,11 @@ async function saveCheckin(){
 }
 
 // ── XP & BADGES ───────────────────────────────────────────
-function addXP(pts){xp+=pts;renderXP();}
+function addXP(pts){
+  xp+=pts;
+  localStorage.setItem('fa_xp',xp);
+  renderXP();
+}
 function renderXP(){
   const lv=Math.floor(xp/100)+1,rem=xp%100;
   document.getElementById('xp-lv').textContent='Niveau '+lv;
@@ -813,7 +823,12 @@ function renderXP(){
   document.getElementById('xp-fill').style.width=rem+'%';
   renderBadges();
 }
-function earnBadge(id){if(earnedBadges.has(id))return;earnedBadges.add(id);addXP(20);}
+function earnBadge(id){
+  if(earnedBadges.has(id))return;
+  earnedBadges.add(id);
+  localStorage.setItem('fa_badges',JSON.stringify([...earnedBadges]));
+  addXP(20);
+}
 function renderBadges(){
   const el=document.getElementById('badges-row');if(!el)return;
   const e=BADGES.filter(b=>earnedBadges.has(b.id));
